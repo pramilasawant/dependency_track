@@ -10,6 +10,8 @@ pipeline {
         DEP_TRACK_SERVER_URL = 'http://localhost:8025'
         DEP_TRACK_PROJECT_ID = '33d794ea-e8d3-49fd-b8f8-0c6cbce382cf'
         MAVEN_HOME = 'Maven 3.8.4'
+        SONARQUBE_CREDENTIALS = credentials('sonar_d_token')  
+        SONARQUBE_SERVER = 'http://localhost:9000'  
     }
 
     parameters {
@@ -40,6 +42,21 @@ pipeline {
             }
         }
 
+        stage('SonarQube Analysis') {
+            steps {
+                dir('testhello') {
+                    withSonarQubeEnv('SonarQube') {
+                        sh '''
+                            mvn sonar:sonar \
+                                -Dsonar.projectKey=testhello \
+                                -Dsonar.host.url=${SONARQUBE_SERVER} \
+                                -Dsonar.login=${SONARQUBE_CREDENTIALS}
+                        '''
+                    }
+                }
+            }
+        }
+
         stage('Generate BOM') {
             steps {
                 dir('testhello') {
@@ -57,12 +74,12 @@ pipeline {
 
         stage('Upload BOM to Dependency-Track') {
             steps {
-               sh ''' curl -X POST "${DEP_TRACK_SERVER_URL}/api/v1/bom" \
+                sh ''' curl -X POST "${DEP_TRACK_SERVER_URL}/api/v1/bom" \
                     -H "X-Api-Key: ${DEP_TRACK_API_KEY}" \
                     -H "Content-Type: multipart/form-data" \
                     -F "project=${DEP_TRACK_PROJECT_ID}" \
-                   -F "bom=@/home/ubuntu/Desktop/testhello/target/bom.xml"
-               '''
+                    -F "bom=@/home/ubuntu/Desktop/testhello/target/bom.xml"
+                '''
             }
         }
 
@@ -142,4 +159,5 @@ pipeline {
         }
     }
 }
+
 }
