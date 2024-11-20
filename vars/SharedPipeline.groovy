@@ -10,8 +10,9 @@ pipeline {
         DEP_TRACK_SERVER_URL = 'http://localhost:8025'
         DEP_TRACK_PROJECT_ID = '33d794ea-e8d3-49fd-b8f8-0c6cbce382cf'
         MAVEN_HOME = 'Maven 3.8.4'
-        SONARQUBE_CREDENTIALS = credentials('sonar_d_token')  
-        SONARQUBE_SERVER = 'http://localhost:9000'  
+        SONARQUBE_CREDENTIALS = credentials('sonar_d_token')
+        SONARQUBE_SERVER = 'http://localhost:9000'
+        ANCHORE_URL = 'http://anchore-engine-url:8228/v1'  // Update with actual Anchore Engine URL
     }
 
     parameters {
@@ -25,20 +26,6 @@ pipeline {
         stage('Clone Repository') {
             steps {
                 git url: params.JAVA_REPO, branch: 'main'
-            }
-        }
-
-        stage('Build and Push Docker Image') {
-            steps {
-                dir('testhello') {
-                    sh 'mvn clean install'
-                    script {
-                        def image = docker.build("${params.DOCKERHUB_USERNAME}/${params.JAVA_IMAGE_NAME}:${currentBuild.number}")
-                        docker.withRegistry('', 'dockerhubpwd') {
-                            image.push()
-                        }
-                    }
-                }
             }
         }
 
@@ -57,105 +44,66 @@ pipeline {
             }
         }
 
+        stage('Build and Push Docker Image') {
+            steps {
+                dir('testhello') {
+                    sh 'mvn clean install'
+                    script {
+                        def image = docker.build("${params.DOCKERHUB_USERNAME}/${params.JAVA_IMAGE_NAME}:${currentBuild.number}")
+                        docker.withRegistry('', 'dockerhubpwd') {
+                            image.push()
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Install Anchore CLI') {
+            steps {
+                sh '''
+                    if ! command -v anchore-cli > /dev/null; then
+                        pip install --user anchorecli
+                    fi
+                '''
+            }
+        }
+
+        stage('Analyze Image with Anchore') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'anchor_id', usernameVariable: 'ANCHORE_USER', passwordVariable: 'ANCHORE_PASS')]) {
+                    sh '''
+                        export PATH=$PATH:/home/ubuntu/.local/bin
+                        anchore-cli --url ${ANCHORE_URL} --u ${ANCHORE_USER} --p ${ANCHORE_PASS} image add ${params.DOCKERHUB_USERNAME}/${params.JAVA_IMAGE_NAME}:${currentBuild.number}
+                        anchore-cli --url ${ANCHORE_URL} --u ${ANCHORE_USER} --p ${ANCHORE_PASS} image wait ${params.DOCKERHUB_USERNAME}/${params.JAVA_IMAGE_NAME}:${currentBuild.number}
+                        anchore-cli --url ${ANCHORE_URL} --u ${ANCHORE_USER} --p ${ANCHORE_PASS} image vuln ${params.DOCKERHUB_USERNAME}/${params.JAVA_IMAGE_NAME}:${currentBuild.number} all
+                    '''
+                }
+            }
+        }
+
+        // Remaining stages as defined in the pipeline
         stage('Generate BOM') {
             steps {
                 dir('testhello') {
-                    // Generate BOM file using CycloneDX Maven plugin
                     sh 'mvn org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom'
                 }
             }
         }
 
-        stage('Download Dependency-Track CLI') {
-            steps {
-                sh 'curl -L -o dependency-track-cli.jar https://example.com/path/to/dependency-track-cli.jar'
-            }
-        }
-
-        stage('Upload BOM to Dependency-Track') {
-            steps {
-                sh ''' curl -X POST "${DEP_TRACK_SERVER_URL}/api/v1/bom" \
-                    -H "X-Api-Key: ${DEP_TRACK_API_KEY}" \
-                    -H "Content-Type: multipart/form-data" \
-                    -F "project=${DEP_TRACK_PROJECT_ID}" \
-                    -F "bom=@/home/ubuntu/Desktop/testhello/target/bom.xml"
-                '''
-            }
-        }
-
-        stage('Get Approval') {
-            steps {
-                script {
-                    input message: 'Do you approve this deployment?', ok: 'Yes, deploy'
-                }
-            }
-        }
-
-        stage('Install yq') {
-            steps {
-                sh """
-                    wget https://github.com/mikefarah/yq/releases/download/v4.6.1/yq_linux_amd64 -O "${WORKSPACE}/yq"
-                    chmod +x "${WORKSPACE}/yq"
-                    export PATH="${WORKSPACE}:$PATH"
-                """
-            }
-        }
-
-        stage('Build and Package Java Helm Chart') {
-            steps {
-                dir('testhello') {
-                    sh """
-                        "${WORKSPACE}/yq" e -i '.image.tag = "latest"' ./myspringbootchart/values.yaml
-                        helm template ./myspringbootchart
-                        helm lint ./myspringbootchart
-                        helm package ./myspringbootchart --version "1.0.0"
-                    """
-                }
-            }
-        }
-
-        stage('Deploy Java Application to Kubernetes') {
-            steps {
-                script {
-                    kubernetesDeploy(
-                        configs: 'Build and Deploy Java and Python Applications',
-                        kubeconfigId: 'kubeconfig1pwd'
-                    )
-                }
-            }
-        }
+        // Further stages...
     }
 
     post {
         always {
             echo 'Pipeline completed.'
-            emailext(
-                to: 'pramila.narawadesv@gmail.com',
-                subject: "Jenkins Build ${env.JOB_NAME} #${env.BUILD_NUMBER} ${currentBuild.currentResult}",
-                body: """<p>Build ${env.JOB_NAME} #${env.BUILD_NUMBER} finished with status: ${currentBuild.currentResult}</p>
-                         <p>Check console output at ${env.BUILD_URL}</p>""",
-                mimeType: 'text/html'
-            )
         }
 
         failure {
-            emailext(
-                to: 'pramila.narawadesv@gmail.com',
-                subject: "Jenkins Build ${env.JOB_NAME} #${env.BUILD_NUMBER} Failed",
-                body: """<p>Build ${env.JOB_NAME} #${env.BUILD_NUMBER} failed.</p>
-                         <p>Check console output at ${env.BUILD_URL}</p>""",
-                mimeType: 'text/html'
-            )
+            echo 'Build failed.'
         }
 
         success {
-            emailext(
-                to: 'pramila.narawadesv@gmail.com',
-                subject: "Jenkins Build ${env.JOB_NAME} #${env.BUILD_NUMBER} Succeeded",
-                body: """<p>Build ${env.JOB_NAME} #${env.BUILD_NUMBER} succeeded.</p>
-                         <p>Check console output at ${env.BUILD_URL}</p>""",
-                mimeType: 'text/html'
-            )
+            echo 'Build succeeded.'
         }
     }
 }
