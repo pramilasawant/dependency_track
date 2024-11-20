@@ -12,7 +12,10 @@ pipeline {
         MAVEN_HOME = 'Maven 3.8.4'
         SONARQUBE_CREDENTIALS = credentials('sonar_d_token')
         SONARQUBE_SERVER = 'http://localhost:9000'
-        ANCHORE_URL = 'http://anchore-engine-url:8228/v1'  // Update with actual Anchore Engine URL
+        ANCHORE_URL = 'http://localhost:8228'
+        ANCHORE_CREDENTIALS = credentials('anchor_id')
+        ANCHORE_CREDENTIALS_USR = 'admin'
+        ANCHORE_CREDENTIALS_PSW = 'foobar'
     }
 
     parameters {
