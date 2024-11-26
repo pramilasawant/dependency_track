@@ -157,7 +157,28 @@ pipeline {
     }
 
     post {
+        
         always {
+              
+                script {
+                    def slackBaseUrl = 'https://slack.com/api/'
+                    def slackChannel = '#builds'
+                    def slackColor = currentBuild.currentResult == 'SUCCESS' ? 'good' : 'danger'
+                    def slackMessage = "Build ${currentBuild.fullDisplayName} finished with status: ${currentBuild.currentResult}"
+
+                    echo "Sending Slack notification to ${slackChannel} with message: ${slackMessage}"
+
+                    slackSend(
+                        baseUrl: 'https://yourteam.slack.com/api/',
+                        teamDomain: 'StarAppleInfotech',
+                        channel: '#builds',
+                        color: slackColor,
+                        botUser: true,
+                        tokenCredentialId: SLACK_CREDENTIALS,
+                        notifyCommitters: false,
+                        message: "Build Java Application #${env.BUILD_NUMBER} finished with status: ${currentBuild.currentResult}"
+                    )
+                }
             echo 'Pipeline completed.'
             emailext(
                 to: 'pramila.narawadesv@gmail.com',
